@@ -1,0 +1,10 @@
+pandas
+scikit-learn
+spacy
+pdfplumber
+joblib
+transformers
+torch
+
+# After installing, download the spaCy model separately (not a pip package):
+#   python -m spacy download en_core_web_md
