@@ -6,7 +6,9 @@ import pdfplumber
 from spacy.matcher import PhraseMatcher
 from sklearn.metrics.pairwise import cosine_similarity
 
-from skills_keywords import ALL_SKILLS, AMBIGUOUS_SKILLS, EDUCATION_LEVELS, canonicalize_skill
+from skills_keywords import ALL_SKILLS, AMBIGUOUS_SKILLS, EDUCATION_LEVELS, SOFT_SKILLS, canonicalize_skill
+
+_SOFT_SKILLS_LOWER = {s.lower() for s in SOFT_SKILLS}
 
 
 nlp = spacy.load("en_core_web_md")
@@ -132,12 +134,23 @@ def _skills_for_matching(raw_text: str) -> tuple[str, set[str]]:
     don't reflect actual required competencies. Classification still uses
     the full preprocessed text; this reduction is specific to matching.
 
+    Soft skills (Teamwork, Communication, Time Management, etc.) are
+    excluded here specifically - verified this matters: a real Junior Chef
+    posting's required-skills list was 6 soft skills out of 11 total, and
+    an unrelated ML/AI resume outscored an actual chef's resume on
+    skill_coverage (0.36 vs 0.091) purely because soft-skill buzzwords
+    appear on almost any professional resume regardless of domain. Soft
+    skills don't differentiate domain fit, so they're excluded from
+    matching (they're still shown normally in extract_skills_and_education's
+    general output - this exclusion is specific to job/resume matching).
+
     Returns both a joined string (for TF-IDF cosine similarity) and a
     lowercase set (for skill-coverage calculation), computed from a single
     extraction pass rather than extracting twice.
     """
     skills = extract_skills_and_education(clean_text(raw_text))["skills"]
-    return ' '.join(skills), {s.lower() for s in skills}
+    hard_skills = [s for s in skills if s.lower() not in _SOFT_SKILLS_LOWER]
+    return ' '.join(hard_skills), {s.lower() for s in hard_skills}
 
 
 def rank_resumes_for_job(job_description: str, resumes: dict[str, str]) -> list[dict]:
@@ -190,12 +203,57 @@ def rank_resume_pdfs_for_job(job_description: str, pdf_paths: dict[str, str]) ->
     return rank_resumes_for_job(job_description, resumes)
 
 
-if __name__ == "__main__":
-    cv_path = "C:/Users/myous/Downloads/MY_CV_QA.pdf"
+def find_best_candidates(job_description: str, resumes: dict[str, str], top_n: int = 5) -> list[dict]:
+    """
+    Search a pool of resumes and return the top_n best candidates for a job.
 
-    print("Category prediction:", predict_category_from_pdf(cv_path))
+    Sorted by skill_coverage first, cosine_similarity as a tiebreaker - NOT
+    by cosine_similarity alone. This matters: cosine_similarity can rank an
+    over-qualified candidate (many skills beyond what's needed) below one
+    with only the exact required skills, since "extra" content dilutes the
+    similarity vector even when every requirement is met (verified earlier -
+    a candidate with all 5 required skills plus 38 more scored 0.389, while
+    a hypothetical candidate with only those exact 5 scored 1.0).
+    skill_coverage answers "does this candidate meet the requirements,"
+    which is what "best candidate" should actually mean here.
+    """
+    results = rank_resumes_for_job(job_description, resumes)
+    results.sort(key=lambda r: (r["skill_coverage"], r["cosine_similarity"]), reverse=True)
+    return results[:top_n]
+
+
+def find_best_candidate_pdfs(job_description: str, pdf_paths: dict[str, str], top_n: int = 5) -> list[dict]:
+    """pdf_paths: {identifier (e.g. filename): path to PDF}"""
+    resumes = {name: extract_text_from_pdf(path) for name, path in pdf_paths.items()}
+    return find_best_candidates(job_description, resumes, top_n=top_n)
+
+
+if __name__ == "__main__":
+    # Synthetic example resume - no external file, no personal data, so
+    # this demo runs for anyone cloning the repo without needing a PDF.
+    sample_resume = """
+    Jane Doe
+
+    Summary
+    Data scientist with experience in Python, machine learning, deep
+    learning, and computer vision. Comfortable working with TensorFlow
+    and PyTorch, with a strong background in data analysis and model
+    deployment.
+
+    Experience
+    Data Scientist, Example Corp, 2021 to Current
+    Built and deployed machine learning models using TensorFlow and
+    scikit-learn. Worked on computer vision projects using PyTorch and
+    OpenCV. Performed data analysis and feature engineering with Pandas
+    and NumPy.
+
+    Education
+    Bachelor of Science in Computer Science
+    """
+
+    print("Category prediction:", predict_category(sample_resume))
     print()
-    print("Skills & education:", extract_skills_and_education_from_pdf(cv_path))
+    print("Skills & education:", extract_skills_and_education(clean_text(sample_resume)))
     print()
 
     job_description = """
@@ -204,5 +262,9 @@ if __name__ == "__main__":
     learning, and computer vision, and is comfortable working with TensorFlow
     or PyTorch.
     """
-    ranking = rank_resume_pdfs_for_job(job_description, {"Mohamed_Youssef": cv_path})
+    ranking = rank_resumes_for_job(job_description, {"Jane_Doe": sample_resume})
     print("Job match ranking:", ranking)
+    print()
+
+    best = find_best_candidates(job_description, {"Jane_Doe": sample_resume}, top_n=3)
+    print("Best candidates:", best)
