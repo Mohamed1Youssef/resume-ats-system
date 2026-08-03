@@ -8,8 +8,8 @@ resumes against job descriptions. Built on the
 ## Features
 
 - **Category classification** - predicts one of 24 job categories (e.g. `HR`,
-  `CHEF`, `INFORMATION-TECHNOLOGY`) using a tuned TF-IDF + Logistic Regression
-  model. 67% accuracy, 0.65 macro-F1 (random guessing would be ~4%).
+  `CHEF`, `INFORMATION-TECHNOLOGY`) using a tuned TF-IDF + Linear SVM
+  model. 69% accuracy, 0.67 macro-F1 (random guessing would be ~4%).
 - **Skills & education extraction** - matches a curated list of 566+
   skill/education terms against resume text with spaCy's `PhraseMatcher`.
   General-purpose NER doesn't have a "skill" category and misclassifies terms
@@ -81,7 +81,7 @@ best = ats.find_best_candidate_pdfs(job_description_text, {
 }, top_n=3)
 ```
 
-## Why TF-IDF + Logistic Regression, not deep learning
+## Why TF-IDF + Linear SVM, not deep learning
 
 - The dataset is small for DL (2481 resumes, some categories as few as 22-36
   examples) - not enough data per class to fine-tune a transformer reliably.
@@ -90,6 +90,9 @@ best = ats.find_best_candidate_pdfs(job_description_text, {
 - It's inspectable - every real diagnostic during development (e.g. why
   `CONSULTANT` gets confused with `BUSINESS-DEVELOPMENT`) was only possible
   because the model's decisions trace back to specific words.
+- Logistic Regression, Random Forest, and Linear SVM were all tuned via
+  `GridSearchCV` (5-fold stratified CV, `f1_macro`); SVM won on both
+  cross-validated and held-out macro-F1 and is the model shipped here.
 
 ## Known limitations (honest, not hidden)
 
